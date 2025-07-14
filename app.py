@@ -1,4 +1,7 @@
-# app.py (Complete with Railway compatibility and Admin Review Logic)
+# Build tests HTML
+    tests_html = ''
+    for test in my_tests:
+        status = test# app.py (Complete with Railway compatibility and Admin Review Logic)
 import os
 import hashlib
 from datetime import datetime, timedelta
@@ -194,7 +197,35 @@ def analyze_answer_quality(question, answer, topic):
     
     return final_score, reasoning
 
-def create_test(eng_id, topic):
+def is_overdue(due_date):
+    """Check if a test is overdue"""
+    try:
+        due = datetime.fromisoformat(due_date)
+        return datetime.now() > due
+    except:
+        return False
+
+def get_time_remaining(due_date):
+    """Get human-readable time remaining"""
+    try:
+        due = datetime.fromisoformat(due_date)
+        remaining = due - datetime.now()
+        
+        if remaining.total_seconds() <= 0:
+            return "OVERDUE"
+        
+        days = remaining.days
+        hours = remaining.seconds // 3600
+        
+        if days > 0:
+            return f"{days}d {hours}h remaining"
+        elif hours > 0:
+            return f"{hours}h remaining"
+        else:
+            minutes = (remaining.seconds % 3600) // 60
+            return f"{minutes}m remaining"
+    except:
+        return "Unknown"
     global counter
     counter += 1
     test_id = f"PD_{topic}_{eng_id}_{counter}"
@@ -202,7 +233,7 @@ def create_test(eng_id, topic):
     # Each engineer gets all 18 questions from their topic
     selected_questions = QUESTIONS[topic]
     
-    test = {
+            test = {
         'id': test_id,
         'engineer_id': eng_id,
         'topic': topic,
@@ -210,7 +241,7 @@ def create_test(eng_id, topic):
         'answers': {},
         'status': 'pending',
         'created': datetime.now().isoformat(),
-        'due': (datetime.now() + timedelta(days=3)).isoformat(),
+        'due': (datetime.now() + timedelta(days=2)).isoformat(),
         'score': None,
         'auto_scores': {}
     }
@@ -1052,6 +1083,10 @@ def student():
     tests_html = ''
     for test in my_tests:
         status = test['status']
+        time_remaining = get_time_remaining(test['due'])
+        is_urgent = 'remaining' in time_remaining and ('h' in time_remaining or 'm' in time_remaining)
+        overdue = is_overdue(test['due'])
+        
         if status == 'completed':
             tests_html += f'''
             <div class="test-card completed">
@@ -1063,14 +1098,28 @@ def student():
             tests_html += f'''
             <div class="test-card submitted">
                 <h3>📝 {test["topic"].upper()} Assessment</h3>
-                <div class="test-meta">⏳ Under Review | 18 Questions | Due: {test["due"][:10]}</div>
+                <div class="test-meta">⏳ Under Review | 18 Questions | Submitted: {test.get("submitted_date", "")[:10]}</div>
                 <div class="test-status review-status">Awaiting Results</div>
             </div>'''
-        else:
+        elif status == 'overdue' or overdue:
+            test['status'] = 'overdue'  # Update status if overdue
             tests_html += f'''
-            <div class="test-card pending">
+            <div class="test-card overdue">
+                <h3>❌ {test["topic"].upper()} Assessment</h3>
+                <div class="test-meta">🚨 OVERDUE | Deadline: {test["due"][:16].replace('T', ' ')} | Status: LOCKED</div>
+                <div class="test-status overdue-status">Deadline Exceeded - Contact Admin</div>
+            </div>'''
+        else:
+            # Pending test with deadline enforcement
+            urgency_class = 'urgent' if is_urgent else 'normal'
+            tests_html += f'''
+            <div class="test-card pending {urgency_class}">
                 <h3>🎯 {test["topic"].upper()} Assessment</h3>
-                <div class="test-meta">📋 18 Questions | ⏰ Due: {test["due"][:10]} | 🎖️ Max: 180 points</div>
+                <div class="test-meta">
+                    📋 18 Questions | ⏰ {time_remaining} | 🎖️ Max: 180 points<br>
+                    <strong>HARD DEADLINE:</strong> {test["due"][:16].replace('T', ' ')}
+                </div>
+                {'<div class="urgent-alert">🚨 URGENT: Less than 24 hours remaining!</div>' if is_urgent else ''}
                 <a href="/student/test/{test["id"]}" class="start-btn">Start Assessment</a>
             </div>'''
     
@@ -1212,8 +1261,31 @@ def student():
             color: #64748b;
         }}
         .pending {{ border-left-color: #3b82f6; }}
+        .pending.urgent {{ border-left-color: #dc2626; animation: urgentPulse 2s infinite; }}
         .submitted {{ border-left-color: #f59e0b; }}
         .completed {{ border-left-color: #10b981; }}
+        .overdue {{ border-left-color: #dc2626; background: linear-gradient(135deg, #fef2f2, #fee2e2); }}
+        
+        @keyframes urgentPulse {{
+            0%, 100% {{ transform: scale(1); }}
+            50% {{ transform: scale(1.02); }}
+        }}
+        
+        .urgent-alert {{
+            background: #fee2e2;
+            border: 2px solid #dc2626;
+            color: #991b1b;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-weight: bold;
+            animation: urgentPulse 2s infinite;
+        }}
+        
+        .overdue-status {{
+            background: #fee2e2;
+            color: #991b1b;
+        }}
     </style>
 </head>
 <body>
@@ -1261,7 +1333,17 @@ def student_test(test_id):
     if not test or test['engineer_id'] != session['user_id']:
         return redirect('/student')
     
+    # Check if test is overdue and block access
+    if is_overdue(test['due']) and test['status'] == 'pending':
+        test['status'] = 'overdue'
+        return redirect('/student')
+    
     if request.method == 'POST' and test['status'] == 'pending':
+        # Double-check deadline before accepting submission
+        if is_overdue(test['due']):
+            test['status'] = 'overdue'
+            return redirect('/student')
+            
         answers = {}
         for i in range(18):  # 18 questions
             answer = request.form.get(f'answer_{i}', '').strip()
@@ -1287,9 +1369,13 @@ def student_test(test_id):
         
         return redirect('/student')
     
-    # If already submitted, show read-only view
+    # If already submitted or overdue, redirect
     if test['status'] != 'pending':
         return redirect('/student')
+    
+    # Calculate time remaining
+    time_remaining = get_time_remaining(test['due'])
+    is_urgent = 'remaining' in time_remaining and ('h' in time_remaining or 'm' in time_remaining)
     
     questions_html = ''
     for i, q in enumerate(test['questions']):
@@ -1311,7 +1397,7 @@ def student_test(test_id):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{test["topic"].upper()} Assessment</title>
+    <title>{test["topic"].upper()} Assessment - DEADLINE: 2 DAYS</title>
     <style>
         body {{ 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -1334,6 +1420,20 @@ def student_test(test_id):
             padding: 0 20px;
             text-align: center;
         }}
+        .deadline-alert {{
+            background: {'linear-gradient(135deg, #dc2626, #b91c1c)' if is_urgent else 'linear-gradient(135deg, #f59e0b, #d97706)'};
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            animation: {'urgentPulse 2s infinite' if is_urgent else 'none'};
+        }}
+        @keyframes urgentPulse {{
+            0%, 100% {{ transform: scale(1); }}
+            50% {{ transform: scale(1.02); }}
+        }}
         .container {{ 
             max-width: 1000px; 
             margin: 20px auto; 
@@ -1345,6 +1445,7 @@ def student_test(test_id):
             padding: 25px;
             margin-bottom: 25px;
             text-align: center;
+            border: {'3px solid #dc2626' if is_urgent else '2px solid #f59e0b'};
         }}
         .question-card {{
             background: rgba(255,255,255,0.95);
@@ -1418,6 +1519,7 @@ def student_test(test_id):
             padding: 30px;
             text-align: center;
             margin-top: 30px;
+            border: {'3px solid #dc2626' if is_urgent else '2px solid #f59e0b'};
         }}
         .warning {{
             background: #fef3c7;
@@ -1429,6 +1531,12 @@ def student_test(test_id):
             display: flex;
             align-items: center;
             gap: 10px;
+        }}
+        .urgent-warning {{
+            background: #fee2e2;
+            border: 2px solid #dc2626;
+            color: #991b1b;
+            animation: urgentPulse 2s infinite;
         }}
         .btn {{
             padding: 14px 28px;
@@ -1466,23 +1574,34 @@ def student_test(test_id):
             width: 0%;
             transition: width 0.3s ease;
         }}
+        .time-remaining {{
+            font-size: 18px;
+            font-weight: bold;
+            color: {'#dc2626' if is_urgent else '#f59e0b'};
+            margin: 10px 0;
+        }}
     </style>
 </head>
 <body>
     <div class="header">
         <div class="header-content">
             <h1>📝 {test["topic"].upper()} Assessment</h1>
-            <p>Physical Design Technical Evaluation</p>
+            <p>⏰ HARD DEADLINE: 2 DAYS FROM ASSIGNMENT</p>
         </div>
     </div>
     
     <div class="container">
+        <div class="deadline-alert">
+            🚨 MANDATORY DEADLINE: Complete within 2 days or test will be auto-locked! 🚨
+        </div>
+        
         <div class="test-info">
             <h2>📋 Assessment Details</h2>
+            <div class="time-remaining">⏰ {time_remaining}</div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px;">
                 <div><strong>Questions:</strong> 18 Technical</div>
                 <div><strong>Max Points:</strong> 180 (10 each)</div>
-                <div><strong>Due Date:</strong> {test["due"][:10]}</div>
+                <div><strong>Hard Deadline:</strong> {test["due"][:16].replace('T', ' ')}</div>
                 <div><strong>Topic:</strong> {test["topic"].upper()}</div>
             </div>
             <div class="progress-bar">
@@ -1495,16 +1614,43 @@ def student_test(test_id):
             {questions_html}
             
             <div class="submit-section">
-                <div class="warning">
-                    ⚠️ <strong>Important:</strong> Review all answers before submitting. You cannot edit after submission.
+                <div class="{'urgent-warning' if is_urgent else 'warning'}">
+                    {'🚨 URGENT: Less than 24 hours remaining! Submit immediately or lose access!' if is_urgent else '⚠️ DEADLINE ENFORCEMENT: Test will be automatically locked after 2 days. Submit before deadline!'}
                 </div>
                 <button type="submit" class="btn btn-primary" id="submitBtn" disabled>Submit Assessment</button>
                 <a href="/student" class="btn btn-secondary">Save & Exit</a>
+                <div style="margin-top: 15px; font-size: 14px; color: #64748b;">
+                    Auto-save enabled • Time remaining: <strong>{time_remaining}</strong>
+                </div>
             </div>
         </form>
     </div>
     
     <script>
+        // Deadline checking
+        function checkDeadline() {{
+            const dueDate = new Date('{test["due"]}');
+            const now = new Date();
+            
+            if (now > dueDate) {{
+                alert('⏰ DEADLINE EXCEEDED! This test is now locked. Redirecting to dashboard.');
+                window.location.href = '/student';
+                return;
+            }}
+            
+            // Show warning if less than 2 hours remaining
+            const timeLeft = dueDate - now;
+            const hoursLeft = timeLeft / (1000 * 60 * 60);
+            
+            if (hoursLeft <= 2 && hoursLeft > 0) {{
+                document.body.style.background = 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)';
+            }}
+        }}
+        
+        // Check deadline every minute
+        setInterval(checkDeadline, 60000);
+        checkDeadline(); // Initial check
+        
         // Character counting and progress tracking
         const textareas = document.querySelectorAll('textarea');
         const progressBar = document.getElementById('progressBar');
@@ -1543,6 +1689,17 @@ def student_test(test_id):
         
         // Form submission validation
         document.getElementById('assessmentForm').addEventListener('submit', function(e) {{
+            // Final deadline check
+            const dueDate = new Date('{test["due"]}');
+            const now = new Date();
+            
+            if (now > dueDate) {{
+                e.preventDefault();
+                alert('⏰ DEADLINE EXCEEDED! Cannot submit after deadline.');
+                window.location.href = '/student';
+                return false;
+            }}
+            
             const answered = Array.from(textareas).filter(ta => ta.value.trim().length >= 20).length;
             if (answered < 15) {{
                 e.preventDefault();
@@ -1550,7 +1707,7 @@ def student_test(test_id):
                 return false;
             }}
             
-            if (!confirm('Are you sure you want to submit? You cannot edit answers after submission.')) {{
+            if (!confirm('⏰ FINAL SUBMISSION: Are you sure you want to submit? You cannot edit after submission and the deadline is enforced!')) {{
                 e.preventDefault();
                 return false;
             }}
