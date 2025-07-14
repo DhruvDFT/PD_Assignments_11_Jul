@@ -1,7 +1,4 @@
-# Build tests HTML
-    tests_html = ''
-    for test in my_tests:
-        status = test# app.py (Complete with Railway compatibility and Admin Review Logic)
+# app.py (Part 1 - First Half)
 import os
 import hashlib
 from datetime import datetime, timedelta
@@ -21,6 +18,36 @@ def hash_pass(pwd):
 
 def check_pass(hashed, pwd):
     return hashed == hashlib.sha256(pwd.encode()).hexdigest()
+
+def is_overdue(due_date):
+    """Check if a test is overdue"""
+    try:
+        due = datetime.fromisoformat(due_date)
+        return datetime.now() > due
+    except:
+        return False
+
+def get_time_remaining(due_date):
+    """Get human-readable time remaining"""
+    try:
+        due = datetime.fromisoformat(due_date)
+        remaining = due - datetime.now()
+        
+        if remaining.total_seconds() <= 0:
+            return "OVERDUE"
+        
+        days = remaining.days
+        hours = remaining.seconds // 3600
+        
+        if days > 0:
+            return f"{days}d {hours}h remaining"
+        elif hours > 0:
+            return f"{hours}h remaining"
+        else:
+            minutes = (remaining.seconds % 3600) // 60
+            return f"{minutes}m remaining"
+    except:
+        return "Unknown"
 
 def init_data():
     global users
@@ -64,7 +91,7 @@ def init_data():
             'exp': 3 + (int(uid[-2:]) % 4)
         }
 
-# Simple Questions - 18 per topic (2+ Experience Level)
+# Questions - 18 per topic (Physical Design)
 QUESTIONS = {
     "sta": [
         "What is Static Timing Analysis (STA)? Why is it important in chip design?",
@@ -197,35 +224,7 @@ def analyze_answer_quality(question, answer, topic):
     
     return final_score, reasoning
 
-def is_overdue(due_date):
-    """Check if a test is overdue"""
-    try:
-        due = datetime.fromisoformat(due_date)
-        return datetime.now() > due
-    except:
-        return False
-
-def get_time_remaining(due_date):
-    """Get human-readable time remaining"""
-    try:
-        due = datetime.fromisoformat(due_date)
-        remaining = due - datetime.now()
-        
-        if remaining.total_seconds() <= 0:
-            return "OVERDUE"
-        
-        days = remaining.days
-        hours = remaining.seconds // 3600
-        
-        if days > 0:
-            return f"{days}d {hours}h remaining"
-        elif hours > 0:
-            return f"{hours}h remaining"
-        else:
-            minutes = (remaining.seconds % 3600) // 60
-            return f"{minutes}m remaining"
-    except:
-        return "Unknown"
+def create_test(eng_id, topic):
     global counter
     counter += 1
     test_id = f"PD_{topic}_{eng_id}_{counter}"
@@ -233,7 +232,7 @@ def get_time_remaining(due_date):
     # Each engineer gets all 18 questions from their topic
     selected_questions = QUESTIONS[topic]
     
-            test = {
+    test = {
         'id': test_id,
         'engineer_id': eng_id,
         'topic': topic,
@@ -241,7 +240,7 @@ def get_time_remaining(due_date):
         'answers': {},
         'status': 'pending',
         'created': datetime.now().isoformat(),
-        'due': (datetime.now() + timedelta(days=2)).isoformat(),
+        'due': (datetime.now() + timedelta(days=2)).isoformat(),  # 2-day deadline
         'score': None,
         'auto_scores': {}
     }
@@ -399,7 +398,8 @@ def login():
             <div style="font-weight: 700; margin-bottom: 16px;">🔐 Test Credentials</div>
             <div class="credentials">
                 <strong>Engineers:</strong> eng001 through eng018<br>
-                <strong>Password:</strong> password123
+                <strong>Password:</strong> password123<br>
+                <strong>Admin:</strong> admin / Vibhuaya@3006
             </div>
             <div class="eng-list">
                 <strong>18 Engineers:</strong><br>
@@ -416,6 +416,11 @@ def login():
 def logout():
     session.clear()
     return redirect('/login')
+
+# END OF PART 1
+# Continue with Part 2...
+# app.py (Part 2 - Second Half)
+# CONTINUE FROM PART 1 - Add this after Part 1
 
 @app.route('/admin')
 def admin():
@@ -449,7 +454,6 @@ def admin():
         .nav-links a {{ color: white; text-decoration: none; margin-left: 20px; padding: 8px 16px; background: rgba(255,255,255,0.2); border-radius: 6px; }}
         .nav-links a:hover {{ background: rgba(255,255,255,0.3); }}
         .container {{ max-width: 1200px; margin: 20px auto; padding: 0 20px; }}
-        .card {{ background: white; border-radius: 12px; padding: 30px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
         .stats {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }}
         .stat {{ background: white; padding: 25px; border-radius: 12px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
         .stat-num {{ font-size: 32px; font-weight: bold; color: #2563eb; margin-bottom: 5px; }}
@@ -494,6 +498,7 @@ def admin():
             font-weight: 600;
             margin-left: 8px;
         }}
+        .card {{ background: white; border-radius: 12px; padding: 30px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
     </style>
 </head>
 <body>
@@ -539,7 +544,7 @@ def admin():
             
             <div class="action-card create">
                 <h3>➕ Create Assessment</h3>
-                <p>Assign new technical assessments to engineers</p>
+                <p>Assign new technical assessments to engineers (⏰ 2-day deadline)</p>
                 <div style="margin-top: 15px;">
                     <form method="POST" action="/admin/create" style="display: inline;">
                         <select name="engineer_id" required style="display: block; width: 100%; margin-bottom: 10px;">
@@ -559,12 +564,15 @@ def admin():
         </div>
         
         <div class="card">
-            <h2>📊 Recent Activity</h2>
+            <h2>📊 System Overview</h2>
             <div style="color: #64748b;">
                 <p>• <strong>{len([t for t in all_tests if t['status'] == 'pending'])}</strong> assessments in progress</p>
                 <p>• <strong>{len([t for t in all_tests if t['status'] == 'submitted'])}</strong> submissions awaiting review</p>
                 <p>• <strong>{len([t for t in all_tests if t['status'] == 'completed'])}</strong> assessments completed</p>
-                <p>• <strong>18</strong> engineers available for assignment</p>
+                <p>• <strong>{len([t for t in all_tests if t['status'] == 'overdue'])}</strong> overdue assessments</p>
+                <p>• <strong>⏰ 2-day hard deadline</strong> enforced for all new assessments</p>
+                <p>• <strong>Auto-scoring system</strong> provides initial evaluation</p>
+                <p>• <strong>Manual review</strong> allows score adjustment before finalization</p>
             </div>
         </div>
     </div>
@@ -616,7 +624,7 @@ def admin_review_list():
                 <div class="meta-item">📅 Submitted: {test.get("submitted_date", "")[:10]}</div>
                 <div class="meta-item">📝 Questions: {answered}/{total_questions}</div>
                 <div class="meta-item">🎯 Avg Auto-Score: {avg_score}/10</div>
-                <div class="meta-item">📊 Estimated Total: {avg_score * answered}/180</div>
+                <div class="meta-item">📊 Estimated Total: {int(avg_score * answered)}/180</div>
             </div>
             <div class="review-actions">
                 <a href="/admin/review/{test['id']}" class="btn-review">Review Answers</a>
@@ -1255,6 +1263,10 @@ def student():
             background: #fef3c7;
             color: #92400e;
         }}
+        .overdue-status {{
+            background: #fee2e2;
+            color: #991b1b;
+        }}
         .no-tests {{
             text-align: center;
             padding: 60px 20px;
@@ -1280,11 +1292,6 @@ def student():
             margin: 10px 0;
             font-weight: bold;
             animation: urgentPulse 2s infinite;
-        }}
-        
-        .overdue-status {{
-            background: #fee2e2;
-            color: #991b1b;
         }}
     </style>
 </head>
@@ -1731,12 +1738,19 @@ def student_test(test_id):
 
 if __name__ == '__main__':
     try:
-        print("🚂 Starting Railway Flask App...")
+        print("🚂 Starting Physical Design Assessment System...")
         init_data()
         print("✅ Data initialized successfully")
+        print("✅ 18 Engineers loaded")
+        print("✅ 54 Questions loaded (STA, CTS, Signoff)")
+        print("✅ Auto-scoring system ready")
+        print("✅ 2-day deadline enforcement active")
         
         port = int(os.environ.get('PORT', 5000))
         print(f"✅ Starting server on port {port}")
+        print("🌐 Access the system at: http://localhost:5000")
+        print("👤 Admin: admin / Vibhuaya@3006")
+        print("👥 Engineers: eng001-eng018 / password123")
         
         app.run(host='0.0.0.0', port=port, debug=False)
         
